@@ -56,7 +56,7 @@ def main():
             .join(edges.alias("e"), F.col("f.vertex") == F.col("e.src"), "inner")
             .select(
                 F.col("e.dst").alias("vertex"),
-                F.array_concat("f.path", F.array("e.dst")).alias("path"),
+                F.expr("array_union(f.path, array(e.dst))").alias("path"),
             )
         )
 
