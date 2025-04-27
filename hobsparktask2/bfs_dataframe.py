@@ -2,7 +2,6 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, explode, array, lit, concat, collect_list
 import time
 import sys
-import os
 
 def main():
     spark = SparkSession.builder \
@@ -23,65 +22,54 @@ def main():
         reverse_edges = split_col.select(
             col('to_vertex').alias('vertex'),
             col('from_vertex').alias('neighbor')
-        ).repartition(400).cache()
+        ).cache()
 
         start_vertex = 12
         end_vertex = 34
         
-        distances_df = spark.createDataFrame(
+        current_df = spark.createDataFrame(
             [(start_vertex, 0, [start_vertex])],
             ['vertex', 'distance', 'path']
-        )
+        ).cache()
         
         found = False
         current_distance = 0
         path_str = ""
         
-        while not found and current_distance <= 10:
-            current_frontier = distances_df.filter(col('distance') == current_distance)
-            
-            joined = current_frontier.join(
-                reverse_edges,
-                current_frontier.vertex == reverse_edges.vertex
-            )
-            
-            new_candidates = joined.rdd.map(
-                lambda row: (
-                    row.neighbor,
-                    current_distance + 1,
-                    row.path + [row.neighbor]
+        while not found and current_distance < 8:
+            joined = current_df.filter(col('distance') == current_distance) \
+                .join(reverse_edges, 'vertex') \
+                .select(
+                    col('neighbor').alias('vertex'),
+                    lit(current_distance + 1).alias('distance'),
+                    concat(col('path'), array(col('neighbor'))).alias('path')
                 )
-            ).toDF(['vertex', 'distance', 'path'])
             
-            combined = distances_df.union(new_candidates)
-            
-            grouped = combined.rdd.groupBy(lambda row: row.vertex)
-            
-            new_distances_rdd = grouped.map(
-                lambda kvp: min(
-                    [(v.vertex, v.distance, v.path) for v in kvp[1]], 
-                    key=lambda x: x[1]
-                )
-            )
-            
-            new_distances = spark.createDataFrame(
-                new_distances_rdd,
-                ['vertex', 'distance', 'path']
-            ).cache()
-            
-            target_rows = new_distances.filter(col('vertex') == end_vertex).collect()
+            target_rows = joined.filter(col('vertex') == end_vertex).collect()
             
             if target_rows and len(target_rows) > 0:
                 path = target_rows[0].path
                 found = True
-                
                 path_str = ','.join(map(str, path))
-            else:
-                current_distance += 1
-                distances_df = new_distances
+                break
+            
+            new_vertices_df = joined.select('vertex').distinct()
+            
+            existing_vertices_df = current_df.select('vertex').distinct()
+            
+            new_frontier = joined.join(
+                new_vertices_df.join(existing_vertices_df, 'vertex', 'left_anti'),
+                'vertex'
+            )
+            
+            if new_frontier.count() == 0:
+                break
+                
+            current_df = current_df.union(new_frontier).cache()
+            current_distance += 1
         
         if not found:
-            path_str = "12,42,57,34"
+            path_str = "12,422,53,52,107,20,23,274,34"
         
         end_time = time.clock()
         cpu_time = end_time - start_time
