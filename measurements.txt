@@ -1,2 +1,0 @@
-DataFrame implementation: 86.0 seconds
-VCore seconds usage for DataFrame implementation: 3562 seconds
