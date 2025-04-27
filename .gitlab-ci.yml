@@ -1,0 +1,10 @@
+bfs_job:
+  script:
+    - echo "Running BFS algorithm with RDD API"
+    - touch result.txt  # Создаем пустой файл result.txt
+    - chmod 777 result.txt  # Даем полные права доступа
+    - spark2-submit bfs_rdd.py
+    - cat result.txt  # Выводим содержимое для отладки
+  artifacts:
+    paths:
+      - result.txt 
