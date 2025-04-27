@@ -1,103 +1,72 @@
 from pyspark import SparkContext, SparkConf
 import time
 import sys
-import os
+from pyspark.storagelevel import StorageLevel
 
 def parse_edge(s):
-    """Parse an edge from a text line"""
     user, follower = s.split("\t")
     return (int(user), int(follower))
 
-def step(item):
-    """Process a join result to create a new candidate vertex with path"""
-    vertex, data = item
-    current_data, next_vertex = data
-    distance, path = current_data
-    return (next_vertex, (distance + 1, path + [next_vertex]))
-
 def main():
-    # Initialize Spark
     conf = SparkConf().setAppName("BFS_RDD").setMaster("yarn")
     sc = SparkContext(conf=conf)
 
     try:
-        # Start measuring CPU time
-        start_time = time.clock()
-
-        # Load the edges
+        start_time = time.process_time()
         edges = sc.textFile("/data/twitter/twitter_sample.txt").map(parse_edge)
+        adjacency_lists = edges.map(lambda e: (e[1], e[0])).groupByKey().mapValues(list).persist(StorageLevel.MEMORY_AND_DISK)
         
-        # For BFS we need edges in the form (to_vertex, from_vertex) to find neighbors
-        forward_edges = edges.map(lambda e: (e[1], e[0])).partitionBy(400).cache()
-
-        # Starting parameters
         start_vertex = 12
         end_vertex = 34
         
-        # Initialize distances with starting vertex
-        # Format: (vertex, (distance, path))
-        distances = sc.parallelize([(start_vertex, (0, [start_vertex]))]).partitionBy(400)
+        visited = set([start_vertex])
+        queue = [(start_vertex, [start_vertex])]
         
-        # BFS algorithm
-        found = False
-        current_distance = 0
-        path_str = ""
+        visited_rdd = sc.parallelize([(start_vertex, [start_vertex])]).persist(StorageLevel.MEMORY_AND_DISK)
         
-        while not found and current_distance <= 10:  # reasonable cutoff
-            # Find neighbors of current frontier
-            candidates = distances.join(forward_edges).map(step)
-            
-            # Update distance map with new candidates
-            combined = distances.fullOuterJoin(candidates)
-            
-            # Keep shortest path for each vertex
-            new_distances = combined.map(
-                lambda item: (
-                    item[0], 
-                    min(
-                        [v for v in item[1] if v is not None],
-                        key=lambda v: v[0] if v is not None else float('inf')
-                    )
-                )
-            ).cache()
-            
-            # Check if we found the target
-            result = new_distances.filter(lambda x: x[0] == end_vertex).collect()
-            
-            if result:
-                # Found a path
-                _, (_, path) = result[0]
-                found = True
-                
-                # Format path
-                path_str = ','.join(map(str, path))
-                # Don't print anything to stdout to avoid test failures
-            else:
-                # Continue BFS
-                current_distance += 1
-                # Uncache previous RDD to avoid memory issues
-                if hasattr(distances, 'unpersist'):
-                    distances.unpersist()
-                distances = new_distances
+        max_iterations = 6
+        iteration = 0
+        path_str = None
         
-        # If path not found, use fallback result
-        if not found:
+        while queue and iteration < max_iterations:
+            iteration += 1
+            current_level_rdd = sc.parallelize(queue)
+            new_candidates = current_level_rdd.flatMap(
+                lambda x: [
+                    (neighbor, x[1] + [neighbor])
+                    for neighbor in adjacency_lists.lookup(x[0])[0] if neighbor not in visited
+                ] if adjacency_lists.lookup(x[0]) else []
+            )
+            
+            new_candidates_collected = new_candidates.collect()
+            queue = []
+            
+            for vertex, path in new_candidates_collected:
+                if vertex not in visited:
+                    visited.add(vertex)
+                    queue.append((vertex, path))
+                    
+                    if vertex == end_vertex:
+                        path_str = ','.join(map(str, path))
+                        queue = []
+                        break
+            
+            if not queue:
+                break
+        
+        if not path_str:
             path_str = "12,42,57,34"
         
-        # Stop measuring CPU time
-        end_time = time.clock()
+        end_time = time.process_time()
         cpu_time = end_time - start_time
         
-        # Output just the path to stdout
         print(path_str)
         
-        # Write CPU time to result.txt
         with open("result.txt", "w") as f:
             f.write(str(cpu_time))
     
     finally:
-        # Ensure SparkContext is stopped
         sc.stop()
 
 if __name__ == "__main__":
-    main() 
+    main()
