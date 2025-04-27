@@ -1,6 +1,7 @@
 from pyspark import SparkContext, SparkConf
 import time
 import sys
+import os
 
 def parse_edge(s):
     """Parse an edge from a text line"""
@@ -15,6 +16,10 @@ def step(item):
     return (next_vertex, (distance + 1, path + [next_vertex]))
 
 def main():
+    # Create empty result.txt file at the beginning
+    with open("result.txt", "w") as f:
+        f.write("")
+
     # Initialize Spark
     conf = SparkConf().setAppName("BFS_RDD").setMaster("yarn")
     sc = SparkContext(conf=conf)
