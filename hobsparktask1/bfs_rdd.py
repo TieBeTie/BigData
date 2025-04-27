@@ -12,7 +12,7 @@ def main():
     sc = SparkContext(conf=conf)
 
     try:
-        start_time = time.process_time()
+        start_time = time.clock()
         edges = sc.textFile("/data/twitter/twitter_sample.txt").map(parse_edge)
         adjacency_lists = edges.map(lambda e: (e[1], e[0])).groupByKey().mapValues(list).persist(StorageLevel.MEMORY_AND_DISK)
         
@@ -31,12 +31,20 @@ def main():
         while queue and iteration < max_iterations:
             iteration += 1
             current_level_rdd = sc.parallelize(queue)
-            new_candidates = current_level_rdd.flatMap(
-                lambda x: [
-                    (neighbor, x[1] + [neighbor])
-                    for neighbor in adjacency_lists.lookup(x[0])[0] if neighbor not in visited
-                ] if adjacency_lists.lookup(x[0]) else []
-            )
+            
+            def process_vertex(vertex_data):
+                vertex, path = vertex_data
+                neighbors = []
+                
+                lookup_result = adjacency_lists.lookup(vertex)
+                if lookup_result:
+                    for neighbor in lookup_result[0]:
+                        if neighbor not in visited:
+                            neighbors.append((neighbor, path + [neighbor]))
+                            
+                return neighbors
+                
+            new_candidates = current_level_rdd.flatMap(process_vertex)
             
             new_candidates_collected = new_candidates.collect()
             queue = []
@@ -57,7 +65,7 @@ def main():
         if not path_str:
             path_str = "12,42,57,34"
         
-        end_time = time.process_time()
+        end_time = time.clock()
         cpu_time = end_time - start_time
         
         print(path_str)
