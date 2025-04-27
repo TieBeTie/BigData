@@ -1,86 +1,90 @@
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, explode, array, lit, concat, collect_list
-import time
+#!/usr/bin/env python3
+
 import sys
+import time
+from typing import List
+
+from pyspark.sql import SparkSession, functions as F, types as T
+
+SRC_ID = 12
+DST_ID = 34
+FILE_PATH = "/data/twitter/twitter_sample.txt"
+
 
 def main():
-    spark = SparkSession.builder \
-        .appName("BFS_DataFrame") \
-        .master("yarn") \
+    spark = (
+        SparkSession.builder
+        .appName("twitter‑bfs‑df")
+        .config("spark.sql.shuffle.partitions", "400")
         .getOrCreate()
+    )
 
-    try:
-        start_time = time.clock()
+    edges_schema = T.StructType([
+        T.StructField("dst", T.IntegerType(), False),
+        T.StructField("src", T.IntegerType(), False),
+    ])
 
-        edges_df = spark.read.text("/data/twitter/twitter_sample.txt")
-        
-        split_col = edges_df.rdd \
-            .map(lambda r: r.value.split('\t')) \
-            .map(lambda parts: (int(parts[0]), int(parts[1]))) \
-            .toDF(['from_vertex', 'to_vertex'])
-        
-        reverse_edges = split_col.select(
-            col('to_vertex').alias('vertex'),
-            col('from_vertex').alias('neighbor')
-        ).cache()
+    edges = (
+        spark.read.text(FILE_PATH)
+        .select(
+            F.split("value", "\t").getItem(0).cast("int").alias("dst"),
+            F.split("value", "\t").getItem(1).cast("int").alias("src"),
+        )
+        .dropna()
+        .filter((F.col("src").isNotNull()) & (F.col("dst").isNotNull()))
+        .cache()
+    )
 
-        start_vertex = 12
-        end_vertex = 34
-        
-        current_df = spark.createDataFrame(
-            [(start_vertex, 0, [start_vertex])],
-            ['vertex', 'distance', 'path']
-        ).cache()
-        
-        found = False
-        current_distance = 0
-        path_str = ""
-        
-        while not found and current_distance < 8:
-            joined = current_df.filter(col('distance') == current_distance) \
-                .join(reverse_edges, 'vertex') \
-                .select(
-                    col('neighbor').alias('vertex'),
-                    lit(current_distance + 1).alias('distance'),
-                    concat(col('path'), array(col('neighbor'))).alias('path')
-                )
-            
-            target_rows = joined.filter(col('vertex') == end_vertex).collect()
-            
-            if target_rows and len(target_rows) > 0:
-                path = target_rows[0].path
-                found = True
-                path_str = ','.join(map(str, path))
-                break
-            
-            new_vertices_df = joined.select('vertex').distinct()
-            
-            existing_vertices_df = current_df.select('vertex').distinct()
-            
-            new_frontier = joined.join(
-                new_vertices_df.join(existing_vertices_df, 'vertex', 'left_anti'),
-                'vertex'
+    edges = edges.repartition("src").persist()
+
+    path_schema = T.StructType([
+        T.StructField("vertex", T.IntegerType(), False),
+        T.StructField("path", T.ArrayType(T.IntegerType()), False),
+    ])
+
+    frontier = spark.createDataFrame([(SRC_ID, [SRC_ID])], schema=path_schema)
+    visited = frontier.select("vertex")
+
+    cpu_start = time.process_time()
+
+    step = 0
+    found_path: List[int] | None = None
+
+    while True:
+        neighbors = (
+            frontier.alias("f")
+            .join(edges.alias("e"), F.col("f.vertex") == F.col("e.src"), "inner")
+            .select(
+                F.col("e.dst").alias("vertex"),
+                F.array_concat("f.path", F.array("e.dst")).alias("path"),
             )
-            
-            if new_frontier.count() == 0:
-                break
-                
-            current_df = current_df.union(new_frontier).cache()
-            current_distance += 1
-        
-        if not found:
-            path_str = "12,422,53,52,107,20,23,274,34"
-        
-        end_time = time.clock()
-        cpu_time = end_time - start_time
-        
-        print(path_str)
-        
-        with open("result.txt", "w") as f:
-            f.write(str(cpu_time))
-    
-    finally:
-        spark.stop()
+        )
+
+        neighbors = neighbors.join(visited, "vertex", "left_anti").persist()
+
+        hit = neighbors.filter(F.col("vertex") == DST_ID)
+        if hit.count():
+            found_path = hit.select("path").first()[0]
+            break
+
+        if neighbors.rdd.isEmpty():
+            break
+
+        visited = visited.union(neighbors.select("vertex")).distinct().persist()
+        frontier = neighbors
+        step += 1
+
+    cpu_end = time.process_time()
+
+    if found_path:
+        print(",".join(str(v) for v in found_path))
+    else:
+        print(f"No path between {SRC_ID} and {DST_ID}", file=sys.stderr)
+
+    print(f"CPU time (DF): {cpu_end - cpu_start:.3f} s", file=sys.stderr)
+
+    spark.stop()
+
 
 if __name__ == "__main__":
     main()
