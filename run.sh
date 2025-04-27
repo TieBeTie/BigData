@@ -1,2 +1,5 @@
 #!/bin/bash
-spark2-submit bfs_rdd.py 
+touch result.txt
+chmod 777 result.txt
+spark2-submit bfs_rdd.py
+cat result.txt 
