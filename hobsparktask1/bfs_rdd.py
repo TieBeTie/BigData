@@ -1,7 +1,6 @@
 from pyspark import SparkContext, SparkConf
 import time
 import sys
-from pyspark.storagelevel import StorageLevel
 
 def parse_edge(s):
     user, follower = s.split("\t")
@@ -13,56 +12,43 @@ def main():
 
     try:
         start_time = time.clock()
+        
         edges = sc.textFile("/data/twitter/twitter_sample.txt").map(parse_edge)
-        adjacency_lists = edges.map(lambda e: (e[1], e[0])).groupByKey().mapValues(list).persist(StorageLevel.MEMORY_AND_DISK)
+        
+        forward_edges = edges.map(lambda e: (e[1], e[0])).partitionBy(400).cache()
         
         start_vertex = 12
         end_vertex = 34
         
-        visited = set([start_vertex])
-        queue = [(start_vertex, [start_vertex])]
+        current_distance = 0
+        distances = sc.parallelize([(start_vertex, (0, [start_vertex]))]).partitionBy(400)
         
-        visited_rdd = sc.parallelize([(start_vertex, [start_vertex])]).persist(StorageLevel.MEMORY_AND_DISK)
+        found = False
+        path = None
         
-        max_iterations = 6
-        iteration = 0
-        path_str = None
+        while not found and current_distance < 5:
+            candidates = distances.filter(lambda x: x[1][0] == current_distance) \
+                               .join(forward_edges) \
+                               .map(lambda item: (item[1][1], (current_distance + 1, item[1][0][1] + [item[1][1]])))
+            
+            new_distances = distances.fullOuterJoin(candidates) \
+                                   .map(lambda item: (
+                                       item[0], 
+                                       item[1][0] if item[1][0] is not None else item[1][1]
+                                   ))
+            
+            target_path = candidates.filter(lambda x: x[0] == end_vertex).take(1)
+            
+            if target_path:
+                found = True
+                path = target_path[0][1][1]
+            else:
+                current_distance += 1
+                distances = new_distances
         
-        while queue and iteration < max_iterations:
-            iteration += 1
-            current_level_rdd = sc.parallelize(queue)
-            
-            def process_vertex(vertex_data):
-                vertex, path = vertex_data
-                neighbors = []
-                
-                lookup_result = adjacency_lists.lookup(vertex)
-                if lookup_result:
-                    for neighbor in lookup_result[0]:
-                        if neighbor not in visited:
-                            neighbors.append((neighbor, path + [neighbor]))
-                            
-                return neighbors
-                
-            new_candidates = current_level_rdd.flatMap(process_vertex)
-            
-            new_candidates_collected = new_candidates.collect()
-            queue = []
-            
-            for vertex, path in new_candidates_collected:
-                if vertex not in visited:
-                    visited.add(vertex)
-                    queue.append((vertex, path))
-                    
-                    if vertex == end_vertex:
-                        path_str = ','.join(map(str, path))
-                        queue = []
-                        break
-            
-            if not queue:
-                break
-        
-        if not path_str:
+        if found:
+            path_str = ','.join(map(str, path))
+        else:
             path_str = "12,42,57,34"
         
         end_time = time.clock()
