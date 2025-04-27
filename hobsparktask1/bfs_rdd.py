@@ -22,22 +22,20 @@ def main():
         
         path = None
         
-        all_paths = []
-        
-        bfs_data = sc.parallelize([(start_vertex, [start_vertex])])
+        bfs_data = sc.parallelize([(start_vertex, tuple([start_vertex]))])
         
         for i in range(8):
             if path:
                 break
                 
             new_paths = bfs_data.join(forward_edges) \
-                      .map(lambda item: (item[1][1], item[1][0] + [item[1][1]])) \
+                      .map(lambda item: (item[1][1], item[1][0] + (item[1][1],))) \
                       .distinct()
             
             end_paths = new_paths.filter(lambda x: x[0] == end_vertex).collect()
             
             if end_paths:
-                path = end_paths[0][1]
+                path = list(end_paths[0][1])
                 break
             
             bfs_data = new_paths
