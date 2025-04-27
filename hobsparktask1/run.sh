@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Ensure output files are created with proper permissions
+# Ensure output file is created with proper permissions
 touch result.txt
 chmod 777 result.txt
 
 # Run the Spark job
-spark2-submit bfs_rdd.py
+cd hobsparktask1 && spark2-submit bfs_rdd.py
 
 # Display the results
 echo "BFS Result:"

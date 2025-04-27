@@ -22,7 +22,7 @@ def main():
 
     try:
         # Start measuring CPU time
-        start_time = time.process_time()
+        start_time = time.clock()
 
         # Load the edges
         edges = sc.textFile("/data/twitter/twitter_sample.txt").map(parse_edge)
@@ -86,11 +86,11 @@ def main():
             print(path_str)  # Print the fallback path to stdout
         
         # Stop measuring CPU time
-        end_time = time.process_time()
+        end_time = time.clock()
         cpu_time = end_time - start_time
         
         # Print CPU time to stdout for debugging
-        print(f"CPU time: {cpu_time} seconds")
+        print("CPU time: %s seconds" % cpu_time)
         
         # Write CPU time to result.txt
         with open("result.txt", "w") as f:
