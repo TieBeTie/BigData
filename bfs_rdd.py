@@ -67,7 +67,13 @@ def main():
             # Stop measuring CPU time
             end_time = time.process_time()
             # Output the path
-            print(','.join(map(str, path)))
+            path_str = ','.join(map(str, path))
+            print(path_str)
+            
+            # Save the path to result.txt for testing
+            with open("result.txt", "w") as f:
+                f.write(path_str)
+                
             # Print the CPU time
             cpu_time = end_time - start_time
             print(f"CPU time: {cpu_time} seconds")
