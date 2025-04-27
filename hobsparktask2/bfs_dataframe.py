@@ -1,8 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
 import sys
 import time
-from typing import List
 
 from pyspark.sql import SparkSession, functions as F, types as T
 
@@ -14,7 +14,7 @@ FILE_PATH = "/data/twitter/twitter_sample.txt"
 def main():
     spark = (
         SparkSession.builder
-        .appName("twitter‑bfs‑df")
+        .appName("twitter-bfs-df")
         .config("spark.sql.shuffle.partitions", "400")
         .getOrCreate()
     )
@@ -45,10 +45,10 @@ def main():
     frontier = spark.createDataFrame([(SRC_ID, [SRC_ID])], schema=path_schema)
     visited = frontier.select("vertex")
 
-    cpu_start = time.process_time()
+    cpu_start = time.time()
 
     step = 0
-    found_path: List[int] | None = None
+    found_path = None
 
     while True:
         neighbors = (
@@ -74,14 +74,14 @@ def main():
         frontier = neighbors
         step += 1
 
-    cpu_end = time.process_time()
+    cpu_end = time.time()
 
     if found_path:
         print(",".join(str(v) for v in found_path))
     else:
-        print(f"No path between {SRC_ID} and {DST_ID}", file=sys.stderr)
+        print("No path between {} and {}".format(SRC_ID, DST_ID))
 
-    print(f"CPU time (DF): {cpu_end - cpu_start:.3f} s", file=sys.stderr)
+    print("CPU time (DF): {:.3f} s".format(cpu_end - cpu_start))
 
     spark.stop()
 
