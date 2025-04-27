@@ -2,8 +2,13 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, explode, array, lit, concat_ws
 import time
 import sys
+import os
 
 def main():
+    # Create empty result.txt file at the beginning
+    with open("result.txt", "w") as f:
+        f.write("")
+        
     # Initialize Spark Session
     spark = SparkSession.builder \
         .appName("BFS_DataFrame") \
