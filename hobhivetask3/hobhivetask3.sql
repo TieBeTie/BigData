@@ -11,12 +11,13 @@ WITH daily_profits AS (
     SELECT 
         content.userInn as userInn,
         DAY(FROM_UNIXTIME(CAST(content.dateTime.ddate AS BIGINT) DIV 1000)) as day_of_month,
-        COALESCE(content.totalSum, 0) as totalSum
+        content.totalSum as totalSum
     FROM kkt_transactions
     WHERE subtype = "receipt" 
         AND content.userInn IS NOT NULL 
         AND content.dateTime.ddate IS NOT NULL
         AND content.totalSum IS NOT NULL
+        AND content.totalSum > 0
 ),
 daily_aggregated AS (
     SELECT 
@@ -31,7 +32,7 @@ ranked_days AS (
         userInn,
         day_of_month,
         daily_profit,
-        ROW_NUMBER() OVER (PARTITION BY userInn ORDER BY daily_profit DESC) as rank_num
+        ROW_NUMBER() OVER (PARTITION BY userInn ORDER BY daily_profit DESC, day_of_month ASC) as rank_num
     FROM daily_aggregated
 )
 SELECT 
