@@ -43,4 +43,4 @@ SELECT
     sum
 FROM cte3
 WHERE rn = 1
-ORDER BY userInn_num ASC;
+ORDER BY CAST(userInn AS BIGINT) ASC;
