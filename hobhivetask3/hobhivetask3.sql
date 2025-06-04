@@ -42,4 +42,4 @@ SELECT
     sum
 FROM cte3
 WHERE rn = 1
-ORDER BY CAST(userInn AS BIGINT) ASC;
+ORDER BY LENGTH(userInn), CAST(userInn AS BIGINT) ASC;
