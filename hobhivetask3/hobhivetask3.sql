@@ -7,40 +7,32 @@ SET hive.mapred.supports.subdirectories=true;
 USE kozhagulovra;
 
 -- Найти наиболее прибыльный день месяца для каждого налогоплательщика
-WITH cte AS (
+WITH daily_profits AS (
     SELECT 
-        content.userInn as userInn_str,
-        CAST(content.userInn AS BIGINT) as userInn_num,
+        content.userInn as userInn,
         DAY(FROM_UNIXTIME(CAST(content.dateTime.ddate AS BIGINT) DIV 1000)) as day,
-        COALESCE(content.totalSum, 0) as totalSum
+        SUM(COALESCE(content.totalSum, 0)) as total_profit
     FROM kkt_transactions
-    WHERE content.userInn IS NOT NULL 
+    WHERE subtype = 'receipt'
+        AND content.userInn IS NOT NULL 
         AND content.dateTime.ddate IS NOT NULL
         AND LENGTH(content.userInn) = 10
         AND content.userInn REGEXP '^[0-9]+$'
+    GROUP BY content.userInn, DAY(FROM_UNIXTIME(CAST(content.dateTime.ddate AS BIGINT) DIV 1000))
 ),
-cte2 AS (
+ranked_days AS (
     SELECT 
-        userInn_str,
-        userInn_num,
-        day, 
-        SUM(totalSum) as sum
-    FROM cte
-    GROUP BY userInn_str, userInn_num, day
-),
-cte3 AS (
-    SELECT 
-        userInn_str,
-        userInn_num,
-        day, 
-        sum, 
-        RANK() OVER (PARTITION BY userInn_str ORDER BY sum DESC) as rn
-    FROM cte2
+        userInn,
+        day,
+        total_profit,
+        RANK() OVER (PARTITION BY userInn ORDER BY total_profit DESC) as rn
+    FROM daily_profits
 )
 SELECT 
-    userInn_str as userInn, 
-    day, 
-    sum
-FROM cte3
+    userInn,
+    day,
+    total_profit
+FROM ranked_days
 WHERE rn = 1
-ORDER BY CAST(userInn AS BIGINT) ASC;
+ORDER BY userInn ASC
+LIMIT 50;
