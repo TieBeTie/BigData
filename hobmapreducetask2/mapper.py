@@ -1,58 +1,43 @@
 import sys
 import re
 
-# Паттерн для строки лога с ERROR
-error_pattern = re.compile(r'^\[.*?\] \[.*?/ERROR\]: (.*)$')
-
-# Паттерн для строки стектрейса (начинается с табуляции или пробелов)
-stacktrace_pattern = re.compile(r'^\s+at\s+([^(]+)')
-
-# Паттерн для строки "Caused by"
-caused_by_pattern = re.compile(r'^\s*Caused by:')
-
-current_error = False
-stacktrace_lines = []
+error_started = False
+stacktrace_methods = []
 
 for line in sys.stdin:
-    line = line.strip()
+    line = line.rstrip()
     
-    # Проверяем, является ли строка началом ошибки
-    error_match = error_pattern.match(line)
-    if error_match:
+    # Проверяем, начинается ли строка с ERROR
+    if '/ERROR]:' in line and line.startswith('['):
         # Если у нас уже была ошибка, обрабатываем её стектрейс
-        if current_error and stacktrace_lines:
-            # Берем самую нижнюю строку стектрейса (последнюю в списке)
-            bottom_trace = stacktrace_lines[-1]
-            print("%s\t1" % bottom_trace)
+        if error_started and stacktrace_methods:
+            # Берем самую нижнюю строку стектрейса (последнюю)
+            bottom_method = stacktrace_methods[-1]
+            print("%s\t1" % bottom_method)
         
         # Начинаем новую ошибку
-        current_error = True
-        stacktrace_lines = []
+        error_started = True
+        stacktrace_methods = []
         continue
     
-    # Если мы в процессе обработки ошибки
-    if current_error:
-        # Проверяем строку стектрейса
-        stacktrace_match = stacktrace_pattern.match(line)
-        if stacktrace_match:
-            method_name = stacktrace_match.group(1).strip()
-            # Убираем информацию о файле и номере строки
-            method_name = re.sub(r'\([^)]*\).*$', '', method_name).strip()
-            if method_name:
-                stacktrace_lines.append(method_name)
-        # Проверяем "Caused by"
-        elif caused_by_pattern.match(line):
-            continue
-        # Если строка не является частью стектрейса, завершаем обработку ошибки
-        elif not line.startswith('\t') and not line.startswith(' '):
-            if stacktrace_lines:
-                # Берем самую нижнюю строку стектрейса
-                bottom_trace = stacktrace_lines[-1]
-                print("%s\t1" % bottom_trace)
-            current_error = False
-            stacktrace_lines = []
+    # Если мы обрабатываем ошибку
+    if error_started:
+        # Ищем строки стектрейса, которые начинаются с табуляции/пробелов и содержат "at"
+        if (line.startswith('\t') or line.startswith('    ')) and 'at ' in line:
+            # Извлекаем метод из строки вида: \tat org.bukkit.plugin.java.JavaPluginLoader.getPluginDescription(JavaPluginLoader.java:162)
+            match = re.search(r'at\s+([^(]+)', line)
+            if match:
+                method = match.group(1).strip()
+                stacktrace_methods.append(method)
+        # Если строка не относится к стектрейсу и не пустая, завершаем обработку ошибки
+        elif line and not line.startswith('\t') and not line.startswith('    ') and not line.startswith('Caused by:'):
+            if stacktrace_methods:
+                bottom_method = stacktrace_methods[-1]
+                print("%s\t1" % bottom_method)
+            error_started = False
+            stacktrace_methods = []
 
-# Обрабатываем последнюю ошибку, если она есть
-if current_error and stacktrace_lines:
-    bottom_trace = stacktrace_lines[-1]
-    print("%s\t1" % bottom_trace) 
+# Обрабатываем последнюю ошибку в файле
+if error_started and stacktrace_methods:
+    bottom_method = stacktrace_methods[-1]
+    print("%s\t1" % bottom_method) 

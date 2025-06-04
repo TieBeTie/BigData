@@ -6,10 +6,9 @@ counter = defaultdict(int)
 for line in sys.stdin:
     try:
         method_name, count = line.strip().split("\t")
-    except Exception:
+        counter[method_name] += int(count)
+    except:
         continue
-
-    counter[method_name] += int(count)
 
 # Сортируем по убыванию количества
 for method_name, count in sorted(counter.items(), key=lambda x: -x[1]):
