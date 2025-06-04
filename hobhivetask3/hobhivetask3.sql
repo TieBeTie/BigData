@@ -16,8 +16,6 @@ WITH cte AS (
     FROM kkt_transactions
     WHERE content.userInn IS NOT NULL 
         AND content.dateTime.ddate IS NOT NULL
-        AND LENGTH(content.userInn) = 10
-        AND content.userInn REGEXP '^[0-9]+$'
 ),
 cte2 AS (
     SELECT 
@@ -34,7 +32,7 @@ cte3 AS (
         userInn_num,
         day, 
         sum, 
-        ROW_NUMBER() OVER (PARTITION BY userInn_str ORDER BY sum DESC) as rn
+        RANK() OVER (PARTITION BY userInn_str ORDER BY sum DESC) as rn
     FROM cte2
 )
 SELECT 
