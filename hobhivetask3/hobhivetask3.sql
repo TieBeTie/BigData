@@ -11,13 +11,11 @@ WITH daily_profits AS (
     SELECT 
         content.userInn as userInn,
         DAY(FROM_UNIXTIME(CAST(content.dateTime.ddate AS BIGINT) DIV 1000)) as day_of_month,
-        content.totalSum as totalSum
+        COALESCE(content.totalSum, 0) as totalSum
     FROM kkt_transactions
     WHERE subtype = "receipt" 
         AND content.userInn IS NOT NULL 
         AND content.dateTime.ddate IS NOT NULL
-        AND content.totalSum IS NOT NULL
-        AND content.totalSum > 0
 ),
 daily_aggregated AS (
     SELECT 
