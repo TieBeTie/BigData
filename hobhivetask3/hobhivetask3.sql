@@ -9,33 +9,38 @@ USE kozhagulovra;
 -- Найти наиболее прибыльный день месяца для каждого налогоплательщика
 WITH cte AS (
     SELECT 
-        content.userInn as userInn, 
+        content.userInn as userInn_str,
+        CAST(content.userInn AS BIGINT) as userInn_num,
         DAY(FROM_UNIXTIME(CAST(content.dateTime.ddate AS BIGINT) DIV 1000)) as day,
         COALESCE(content.totalSum, 0) as totalSum
     FROM kkt_transactions
     WHERE content.userInn IS NOT NULL 
         AND content.dateTime.ddate IS NOT NULL
+        AND LENGTH(content.userInn) = 10
+        AND content.userInn REGEXP '^[0-9]+$'
 ),
 cte2 AS (
     SELECT 
-        userInn, 
+        userInn_str,
+        userInn_num,
         day, 
         SUM(totalSum) as sum
     FROM cte
-    GROUP BY userInn, day
+    GROUP BY userInn_str, userInn_num, day
 ),
 cte3 AS (
     SELECT 
-        userInn, 
+        userInn_str,
+        userInn_num,
         day, 
         sum, 
-        ROW_NUMBER() OVER (PARTITION BY userInn ORDER BY sum DESC) as rn
+        ROW_NUMBER() OVER (PARTITION BY userInn_str ORDER BY sum DESC) as rn
     FROM cte2
 )
 SELECT 
-    userInn, 
+    userInn_str as userInn, 
     day, 
     sum
 FROM cte3
 WHERE rn = 1
-ORDER BY CAST(userInn AS BIGINT) ASC;
+ORDER BY userInn_num ASC;
