@@ -55,12 +55,12 @@ python3 spannertask1_isolation_demo.py || {
 # Проверяем результаты
 echo ""
 echo "=== Results ==="
-if [ -f "spannertask1_results.txt" ]; then
-    echo "✅ Results file created: spannertask1_results.txt"
+if [ -f "result.txt" ]; then
+    echo "✅ Results file created: result.txt"
     echo "TOP-10 results:"
-    head -15 spannertask1_results.txt
+    head -15 result.txt
     echo "..."
-    echo "Total lines: $(wc -l < spannertask1_results.txt)"
+    echo "Total lines: $(wc -l < result.txt)"
 else
     echo "❌ Results file not found"
     exit 1

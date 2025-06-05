@@ -209,7 +209,7 @@ class IsolationDemo:
                 print("⚠️ Небольшая разница в рейтингах (возможно, уже обновлялись ранее)")
                 print("🔄 Попробуйте перезапустить setup.py для сброса данных")
 
-def save_results_to_file(demo_results, filename="spannertask1_results.txt"):
+def save_results_to_file(demo_results, filename="result.txt"):
     """Сохранение результатов в файл для сдачи (TOP-100 строк)"""
     with open(filename, 'w', encoding='utf-8') as f:
         f.write("SPANNER TASK 1: Демонстрация неблокирующего чтения\n")
@@ -238,7 +238,7 @@ def main():
         # Сохраняем результаты для сдачи
         if demo.long_read_results:
             save_results_to_file(demo.long_read_results)
-            print(f"\n💾 Результаты сохранены в spannertask1_results.txt")
+            print(f"\n💾 Результаты сохранены в result.txt")
             print(f"📄 Файл содержит TOP-100 строк для сдачи задания")
         else:
             print(f"\n⚠️ Нет результатов для сохранения")
