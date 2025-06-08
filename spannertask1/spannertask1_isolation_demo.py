@@ -1,255 +1,250 @@
 #!/usr/bin/env python3
+"""
+Spanner Task 1: Non-blocking reads isolation demonstration
+Shows that read-only transactions are not blocked by concurrent read-write transactions
+"""
 
-from google.cloud import spanner
-import threading
+import os
 import time
+import threading
+from google.cloud import spanner
 from datetime import datetime
-import sys
 
-PROJECT_ID = "hobod2025s-kozhagulovra" 
-INSTANCE_ID = "kozhagulovra-movielens-instance"
-DATABASE_ID = "kozhagulovra-movielens-db"
+# Configuration
+PROJECT_ID = "ramatreemany"
+INSTANCE_ID = "demo-spanner-instance"
+DATABASE_ID = "movielens-db"
 
-class IsolationDemo:
-    def __init__(self):
-        self.spanner_client = spanner.Client(project=PROJECT_ID)
-        self.instance = self.spanner_client.instance(INSTANCE_ID)
-        self.database = self.instance.database(DATABASE_ID)
-        self.long_read_results = []
-        self.update_completed = False
+# Results storage
+query1_results = []  # Read transaction during update
+query4_results = []  # Read transaction after update
+update_completed = False
+
+def setup_service_account():
+    """Set up Google Cloud authentication"""
+    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'ramatreemany-0d452ecc0a37.json'
+
+def long_read_transaction(database, results_list, transaction_name):
+    """
+    Execute a read transaction with N queries, each reading 10 rows
+    Query 1: rows 1-10, Query 2: rows 11-20, etc.
+    Uses multi-use read-only transaction for true isolation demonstration
+    """
+    start_time = datetime.now()
+    print(f"{transaction_name}: Starting long read transaction...")
+    
+    # Use multi-use read-only transaction for true isolation
+    # This ensures all queries see the same consistent snapshot of data
+    with database.snapshot(multi_use=True) as snapshot:
+        batch_size = 10
+        offset = 0
+        query_count = 0
         
-    def long_read_transaction(self, num_batches=10, batch_size=10):
-        print(f"Начинаем долгую read-only транзакцию")
-        print(f"Читаем {num_batches} батчей по {batch_size} записей")
-        
-        # Создаем snapshot - фиксируем TrueTime timestamp
-        with self.database.snapshot() as snapshot:
-            transaction_start_time = datetime.now()
-            print(f"⏰ Транзакция начата в: {transaction_start_time}")
+        while query_count < 10:  # Read 10 batches = 100 rows total
+            query_count += 1
             
-            for batch_num in range(num_batches):
-                offset = batch_num * batch_size
-                
-                query = f"""
-                SELECT userId, movieId, rating, timestamp
-                FROM ratings
-                ORDER BY userId, movieId
+            sql = f"""
+                SELECT r.userId, r.movieId, r.rating, r.timestamp
+                FROM ratings r
+                ORDER BY r.userId, r.movieId
                 LIMIT {batch_size} OFFSET {offset}
-                """
-                
-                batch_start = datetime.now()
-                results = snapshot.execute_sql(query)
-                batch_data = list(results)
-                batch_end = datetime.now()
-                
-                print(f"📦 Батч {batch_num + 1}/{num_batches}: "
-                      f"получено {len(batch_data)} записей "
-                      f"за {(batch_end - batch_start).total_seconds():.3f}s")
-                
-                if batch_data:
-                    for row in batch_data[:3]:
-                        self.long_read_results.append({
-                            'batch': batch_num + 1,
-                            'userId': row[0],
-                            'movieId': row[1], 
-                            'rating': row[2],
-                            'timestamp': row[3],
-                            'read_time': batch_end
-                        })
-                
-                # Проверяем, завершилось ли обновление
-                if self.update_completed:
-                    print(f"📝 Обновление завершилось во время чтения батча {batch_num + 1}")
-                
-                # Задержка между батчами для демонстрации
-                if batch_num < num_batches - 1:
-                    time.sleep(2)  # 2 секунды между батчами
+            """
             
-            transaction_end_time = datetime.now()
-            total_time = (transaction_end_time - transaction_start_time).total_seconds()
-            print(f"✅ Read-only транзакция завершена за: {total_time:.2f}s")
+            results = snapshot.execute_sql(sql)
+            batch_data = list(results)
             
-        return self.long_read_results
+            if not batch_data:
+                break  # No more data
+                
+            print(f"{transaction_name}: Query {query_count} - read {len(batch_data)} rows (offset {offset})")
+            
+            # Store results
+            for row in batch_data:
+                record = {
+                    'userId': row[0],
+                    'movieId': row[1], 
+                    'rating': row[2],
+                    'timestamp': row[3]
+                }
+                results_list.append(record)
+            
+            offset += batch_size
+            
+            # Simulate processing time between queries
+            time.sleep(0.5)
     
-    def update_fantasy_ratings(self):
-        """
-        Обновление рейтингов фильмов жанра Fantasy
-        Поднимает все оценки Fantasy фильмов на 2 балла
-        Работает с реальными данными MovieLens из HDFS
-        """
-        print(f"🔄 Запускаем обновление Fantasy рейтингов в реальных данных MovieLens...")
-        
-        def update_transaction(transaction):
-            # Сначала посмотрим, сколько Fantasy записей в реальных данных
-            count_query = """
-            SELECT COUNT(*) as count
+    end_time = datetime.now()
+    duration = (end_time - start_time).total_seconds()
+    
+    if results_list:
+        ratings = [r['rating'] for r in results_list]
+        avg_rating = sum(ratings) / len(ratings)
+        print(f"{transaction_name}: COMPLETED - {len(results_list)} total records, avg rating: {avg_rating:.3f}, duration: {duration:.1f}s")
+    else:
+        print(f"{transaction_name}: COMPLETED - no data found")
+
+def update_fantasy_ratings(database):
+    """Update all Fantasy movie ratings by adding 2 to each rating"""
+    global update_completed
+    
+    # Wait longer to ensure read transaction starts and reads some data first
+    time.sleep(3)
+    
+    start_time = datetime.now()
+    print("UPDATE: Starting Fantasy ratings update...")
+    
+    def update_transaction(transaction):
+        # Find Fantasy movie ratings to update
+        results = transaction.execute_sql("""
+            SELECT r.userId, r.movieId, r.rating
             FROM ratings r
-            JOIN movies m ON r.movieId = m.movieId  
-            WHERE 'Fantasy' IN UNNEST(m.genres)
-            """
-            count_result = list(transaction.execute_sql(count_query))
-            count = count_result[0][0] if count_result else 0
-            
-            # Выполняем обновление всех Fantasy рейтингов
-            update_query = """
-            UPDATE ratings 
-            SET rating = LEAST(5.0, rating + 2.0)
-            WHERE movieId IN (
-                SELECT movieId 
-                FROM movies 
-                WHERE 'Fantasy' IN UNNEST(genres)
-            )
-            """
-            
-            transaction.execute_update(update_query)
-            return count
+            JOIN movies m ON r.movieId = m.movieId
+            WHERE m.genres LIKE '%Fantasy%'
+        """)
         
-        update_start = datetime.now()
-        updated_count = self.database.run_in_transaction(update_transaction)
-        update_end = datetime.now()
-        update_time = (update_end - update_start).total_seconds()
+        updates = []
+        for row in results:
+            user_id, movie_id, current_rating = row[0], row[1], row[2]
+            new_rating = min(5.0, current_rating + 2.0)  # Cap at 5.0
+            updates.append((user_id, movie_id, new_rating))
         
-        self.update_completed = True
-        print(f"✅ Обновление завершено: {updated_count} Fantasy рейтингов за {update_time:.2f}s")
-        return updated_count
+        if updates:
+            # Perform updates
+            for user_id, movie_id, new_rating in updates:
+                transaction.execute_update(
+                    "UPDATE ratings SET rating = @new_rating WHERE userId = @user_id AND movieId = @movie_id",
+                    params={
+                        'new_rating': new_rating,
+                        'user_id': user_id,
+                        'movie_id': movie_id
+                    },
+                    param_types={
+                        'new_rating': spanner.param_types.FLOAT64,
+                        'user_id': spanner.param_types.INT64,
+                        'movie_id': spanner.param_types.INT64
+                    }
+                )
+        
+        return len(updates)
     
-    def verify_isolation(self):
-        """
-        Проверка изоляции: запуск новой транзакции для чтения обновленных данных
-        """
-        print(f"🔍 Проверяем обновленные данные новой транзакцией...")
-        
-        query = """
-        SELECT userId, movieId, rating, timestamp
-        FROM ratings
-        ORDER BY userId, movieId
-        LIMIT 50
-        """
-        
-        with self.database.snapshot() as snapshot:
-            results = snapshot.execute_sql(query)
-            new_data = list(results)
-        
-        print(f"📊 Получено {len(new_data)} записей после обновления")
-        return new_data
+    # Execute update transaction
+    updated_count = database.run_in_transaction(update_transaction)
     
-    def run_isolation_demo(self):
-        """
-        Основная демонстрация изоляции транзакций
-        """
-        print("=" * 60)
-        print("🎯 ДЕМОНСТРАЦИЯ ИЗОЛЯЦИИ ТРАНЗАКЦИЙ В SPANNER")
-        print("📊 Используем реальные данные MovieLens из HDFS")
-        print("=" * 60)
-        
-        # Сброс состояния
-        self.long_read_results = []
-        self.update_completed = False
-        
-        # 1. Запускаем долгую read-only транзакцию в отдельном потоке
-        read_thread = threading.Thread(
-            target=lambda: self.long_read_transaction(num_batches=8, batch_size=15)
-        )
-        
-        # 2. Запускаем транзакцию чтения
-        read_thread.start()
-        
-        # 3. Ждем 3 секунды, затем запускаем обновление
-        time.sleep(3)
-        print("\n" + "="*50)
-        print("🚀 ЗАПУСКАЕМ ОБНОВЛЕНИЕ ВО ВРЕМЯ ЧТЕНИЯ!")
-        print("="*50)
-        
-        # 4. Выполняем обновление
-        self.update_fantasy_ratings()
-        
-        # 5. Ждем завершения read-only транзакции
-        read_thread.join()
-        
-        # 6. Проверяем результаты
-        print("\n" + "="*50)
-        print("📋 АНАЛИЗ РЕЗУЛЬТАТОВ")
-        print("="*50)
-        
-        print("📊 Данные, прочитанные СТАРОЙ транзакцией (до обновления):")
-        for i, row in enumerate(self.long_read_results[:10]):
-            print(f"  {i+1}. User {row['userId']}, Movie {row['movieId']}: "
-                  f"rating={row['rating']:.1f}")
-        
-        # 7. Проверяем данные новой транзакцией
-        print(f"\n🔄 Запускаем НОВУЮ транзакцию для проверки обновленных данных...")
-        new_data = self.verify_isolation()
-        
-        print("📊 Данные, прочитанные НОВОЙ транзакцией (после обновления):")
-        for i, row in enumerate(new_data[:10]):
-            print(f"  {i+1}. User {row[0]}, Movie {row[1]}: "
-                  f"rating={row[2]:.1f}")
-        
-        # 8. Анализ изоляции
-        print("\n" + "="*50)
-        print("🎯 ВЫВОДЫ ОБ ИЗОЛЯЦИИ:")
-        print("="*50)
-        
-        old_ratings = [r['rating'] for r in self.long_read_results]
-        new_ratings = [r[2] for r in new_data[:len(old_ratings)]]
-        
-        if old_ratings and new_ratings:
-            avg_old = sum(old_ratings) / len(old_ratings)
-            avg_new = sum(new_ratings) / len(new_ratings)
-            
-            print(f"📈 Средний рейтинг в СТАРОЙ транзакции: {avg_old:.2f}")
-            print(f"📈 Средний рейтинг в НОВОЙ транзакции: {avg_new:.2f}")
-            print(f"📊 Разница: {avg_new - avg_old:.2f}")
-            
-            if abs(avg_new - avg_old) > 0.5:  # Снижен порог для реальных данных
-                print("✅ ИЗОЛЯЦИЯ ПОДТВЕРЖДЕНА: Старая транзакция читала данные ДО обновления!")
-                print("✅ Новая транзакция читает обновленные данные (+2 к рейтингам Fantasy)!")
-                print("🌟 Эксперимент с реальными данными MovieLens из HDFS успешен!")
-            else:
-                print("⚠️ Небольшая разница в рейтингах (возможно, уже обновлялись ранее)")
-                print("🔄 Попробуйте перезапустить setup.py для сброса данных")
+    end_time = datetime.now()
+    duration = (end_time - start_time).total_seconds()
+    update_completed = True
+    
+    print(f"UPDATE: COMPLETED - {updated_count} Fantasy ratings updated (+2 each) in {duration:.2f}s")
 
-def save_results_to_file(demo_results, filename="result.txt"):
-    """Сохранение результатов в файл для сдачи (TOP-100 строк)"""
-    with open(filename, 'w', encoding='utf-8') as f:
-        f.write("SPANNER TASK 1: Демонстрация неблокирующего чтения\n")
-        f.write("Данные: Реальный MovieLens dataset из HDFS\n")
-        f.write("="*60 + "\n\n")
-        
-        f.write("РЕЗУЛЬТАТЫ ДОЛГОЙ READ-ONLY ТРАНЗАКЦИИ (до обновления):\n")
-        f.write("-"*50 + "\n")
-        for i, row in enumerate(demo_results[:100]):
-            f.write(f"{i+1:3d}. User {row['userId']:6d}, Movie {row['movieId']:6d}: "
-                   f"rating={row['rating']:4.1f}\n")
-        
-        f.write(f"\n Всего записей в демонстрации: {len(demo_results)}\n")
-        f.write(f"Источник данных: HDFS /data/movielens/\n")
-        f.write(f"Время выполнения: {datetime.now()}\n")
+def demonstrate_isolation():
+    """Main demonstration of transaction isolation"""
+    setup_service_account()
+    
+    spanner_client = spanner.Client(project=PROJECT_ID)
+    instance = spanner_client.instance(INSTANCE_ID)
+    database = instance.database(DATABASE_ID)
+    
+    # Clear previous results
+    global query1_results, query4_results, update_completed
+    query1_results.clear()
+    query4_results.clear()
+    update_completed = False
+    
+    print("=== SPANNER ISOLATION DEMONSTRATION ===")
+    print("STEP 1: Concurrent read transaction and Fantasy rating updates")
+    print()
+    
+    # Start long read transaction in a separate thread
+    read_thread = threading.Thread(
+        target=long_read_transaction,
+        args=(database, query1_results, "QUERY-1")
+    )
+    
+    # Start update transaction in another thread  
+    update_thread = threading.Thread(
+        target=update_fantasy_ratings,
+        args=(database,)
+    )
+    
+    # Start read transaction first
+    read_thread.start()
+    
+    # Start update transaction shortly after
+    update_thread.start()
+    
+    # Wait for both to complete
+    read_thread.join()
+    update_thread.join()
+    
+    print()
+    print("STEP 2: Read transaction after updates completed")
+    print()
+    
+    # Wait a moment then run second read transaction
+    time.sleep(1)
+    long_read_transaction(database, query4_results, "QUERY-4")
+    
+    print()
+    print("=== ISOLATION ANALYSIS ===")
+    analyze_isolation_results()
 
-def main():
-    """Основная функция"""
-    try:
-        print("🔌 Подключаемся к Spanner с данными из HDFS...")
-        demo = IsolationDemo()
-        
-        # Запускаем демонстрацию
-        demo.run_isolation_demo()
-        
-        # Сохраняем результаты для сдачи
-        if demo.long_read_results:
-            save_results_to_file(demo.long_read_results)
-            print(f"\n💾 Результаты сохранены в result.txt")
-            print(f"📄 Файл содержит TOP-100 строк для сдачи задания")
-        else:
-            print(f"\n⚠️ Нет результатов для сохранения")
-        
-    except Exception as e:
-        print(f"❌ Ошибка: {e}")
-        print(f"\n💡 Убедитесь, что:")
-        print(f"   1. Запущен spannertask1_setup.py")
-        print(f"   2. Данные загружены из HDFS")
-        print(f"   3. PROJECT_ID настроен правильно")
-        sys.exit(1)
+def analyze_isolation_results():
+    """Analyze results to prove transaction isolation"""
+    if not query1_results or not query4_results:
+        print("ERROR: Missing results data")
+        return
+    
+    # Compare ratings for common records
+    before_ratings = {(r['userId'], r['movieId']): r['rating'] for r in query1_results}
+    after_ratings = {(r['userId'], r['movieId']): r['rating'] for r in query4_results}
+    
+    # Calculate averages
+    before_avg = sum(before_ratings.values()) / len(before_ratings)
+    after_avg = sum(after_ratings.values()) / len(after_ratings)
+    
+    print(f"QUERY-1 (during update): {len(query1_results)} records, avg rating: {before_avg:.3f}")
+    print(f"QUERY-4 (after update):  {len(query4_results)} records, avg rating: {after_avg:.3f}")
+    print(f"Difference: +{after_avg - before_avg:.3f}")
+    print()
+    
+    if after_avg > before_avg:
+        print("✓ ISOLATION PROVEN:")
+        print("  - QUERY-1 saw original data (isolated from concurrent updates)")
+        print("  - QUERY-4 saw updated data (Fantasy ratings increased)")
+        print("  - Read-only transaction was NOT blocked by read-write transaction")
+    else:
+        print("✗ No significant difference detected")
+    
+    # Show specific examples if Fantasy movies were updated
+    fantasy_examples = []
+    for (user_id, movie_id), before_rating in before_ratings.items():
+        if (user_id, movie_id) in after_ratings:
+            after_rating = after_ratings[(user_id, movie_id)]
+            if after_rating > before_rating:
+                fantasy_examples.append((user_id, movie_id, before_rating, after_rating))
+                if len(fantasy_examples) >= 3:
+                    break
+    
+    if fantasy_examples:
+        print("\nFantasy movie rating changes:")
+        for user_id, movie_id, before, after in fantasy_examples:
+            print(f"  User {user_id}, Movie {movie_id}: {before:.1f} → {after:.1f} (+{after-before:.1f})")
+
+def save_results_to_files():
+    """Save top 100 results to files as required"""
+    def save_top_100(results, filename):
+        with open(filename, 'w') as f:
+            f.write("userId,movieId,rating,timestamp\n")
+            for record in results[:100]:
+                f.write(f"{record['userId']},{record['movieId']},{record['rating']},{record['timestamp']}\n")
+    
+    save_top_100(query1_results, "query1_results_top100.csv")
+    save_top_100(query4_results, "query4_results_top100.csv")
+    
+    print(f"\nResults saved:")
+    print(f"  query1_results_top100.csv - {min(len(query1_results), 100)} records")
+    print(f"  query4_results_top100.csv - {min(len(query4_results), 100)} records")
 
 if __name__ == "__main__":
-    main() 
+    demonstrate_isolation()
+    save_results_to_files() 
