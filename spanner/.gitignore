@@ -1,0 +1,6 @@
+# Ignore large dataset files
+local_dataset/movielens/ratings_20m.csv
+local_dataset/movielens/movies.csv
+ramatreemany-0d452ecc0a37.json
+
+# Keep only movies.csv which is smaller 
