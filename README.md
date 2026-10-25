@@ -5,3 +5,4 @@ Coursework in Hive, MapReduce, Spark and distributed databases. Original branche
 ## Projects
 
 - [hobhive](hobhive/)
+- [hobmapreduce](hobmapreduce/)
